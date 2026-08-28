@@ -944,3 +944,124 @@ chrome.action.onClicked.addListener(async (tab) => {
     badge(tabId, 'err', '#d03b3b');
   }
 });
+
+/* ==================================================================== *
+ * AUTO-UPDATE
+ *
+ * Chrome only auto-updates extensions it installed from the Web Store.
+ * An unpacked ("Load unpacked") install — which is how this is distributed
+ * today — is never updated by Chrome at all, and reloading the extension
+ * does not even replace a monitor already injected into an open call tab.
+ * That is how a 13-hour call tab ended up running a build from hours
+ * earlier while the folder on disk said otherwise.
+ *
+ * Two halves, each safe on its own:
+ *
+ *  1. THE FOLDER. A launchd agent (scripts/install-agent.sh) pulls this
+ *     repository into the unpacked folder on a schedule. Chrome keeps
+ *     serving the files it loaded, so new files sit there unused until the
+ *     extension restarts — and chrome.runtime.reload() restarts it exactly
+ *     as the chrome://extensions reload button does, re-reading from disk.
+ *     We do that once per browser start: no call is in progress then, so
+ *     nothing can be interrupted, and "updates apply when you next start
+ *     Chrome" is how ordinary software behaves. A storage flag makes it
+ *     once per start rather than a reload loop.
+ *
+ *  2. THE NOTICE. A daily check against the published version. This is the
+ *     half that works for a plain zip install with no agent, and it never
+ *     installs anything — it badges the toolbar so nobody unknowingly runs
+ *     stale code. A private repository answers 404 here; that is fine and
+ *     silent, the check simply never reports an update.
+ * ==================================================================== */
+
+const UPDATE_FEED_URL =
+  'https://api.github.com/repos/mahmudcoding/rtc-stream-monitor/releases/latest';
+const UPDATE_ALARM = 'rtcmon-update-check';
+const UPDATE_PERIOD_MINUTES = 720;   // twice a day
+const RELOAD_FLAG = 'rtcmonPendingReload';
+
+function runningVersion() {
+  try { return chrome.runtime.getManifest().version || null; } catch (e) { return null; }
+}
+
+/* "1.7.10" must beat "1.7.9", so compare numerically per field. Anything
+   unparseable returns false: an update is a positive claim like any other. */
+function isNewerVersion(candidate, current) {
+  if (typeof candidate !== 'string' || typeof current !== 'string') return false;
+  const a = candidate.split('.').map(Number), b = current.split('.').map(Number);
+  if (a.length !== 3 || b.length !== 3) return false;
+  if (a.some(n => !Number.isInteger(n)) || b.some(n => !Number.isInteger(n))) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+
+async function publishedVersion() {
+  if (typeof fetch !== 'function') return null;
+  try {
+    const response = await fetch(UPDATE_FEED_URL, {
+      cache: 'no-store', headers: { accept: 'application/vnd.github+json' }
+    });
+    if (!response.ok) return null;             // 404 on a private repo: silent
+    const body = await response.json();
+    const raw = body && (body.tag_name || body.version || body.name);
+    const match = /(\d+\.\d+\.\d+)/.exec(String(raw || ''));
+    return match ? match[1] : null;
+  } catch (e) {
+    return null;                                // offline, blocked, rate-limited
+  }
+}
+
+/* The badge is shared with the per-tab injection status, so only ever set the
+   global (tab-less) badge here — a per-tab badge always wins over it. */
+async function checkForUpdate() {
+  const current = runningVersion();
+  const latest = await publishedVersion();
+  if (!current || !latest || !isNewerVersion(latest, current)) return null;
+  try {
+    chrome.action.setBadgeText({ text: '↑' });
+    chrome.action.setBadgeBackgroundColor({ color: '#0ca30c' });
+    chrome.action.setTitle({
+      title: 'RTC Stream Monitor ' + latest + ' is available (running ' + current + ')'
+    });
+  } catch (e) { /* badge is cosmetic */ }
+  return latest;
+}
+
+/* Restart once per browser start so a folder updated by the agent is picked
+   up. Guarded by a stored flag: runtime.reload() starts the worker again, and
+   an unguarded reload here would be an infinite restart loop. */
+async function reloadForPulledUpdate() {
+  const store = chrome.storage && chrome.storage.local;
+  if (!store) return false;
+  let pending = false;
+  try {
+    const state = await store.get(RELOAD_FLAG);
+    pending = !!(state && state[RELOAD_FLAG]);
+  } catch (e) { return false; }
+  if (pending) {
+    try { await store.remove(RELOAD_FLAG); } catch (e) {}
+    return false;                               // this start IS the reload
+  }
+  try { await store.set({ [RELOAD_FLAG]: true }); } catch (e) { return false; }
+  try { chrome.runtime.reload(); } catch (e) {
+    try { await store.remove(RELOAD_FLAG); } catch (e2) {}
+    return false;
+  }
+  return true;
+}
+
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(async () => {
+    if (await reloadForPulledUpdate()) return;  // reloading; the next start continues
+    checkForUpdate();
+  });
+}
+if (chrome.alarms) {
+  chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: UPDATE_PERIOD_MINUTES });
+  if (chrome.alarms.onAlarm) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm && alarm.name === UPDATE_ALARM) checkForUpdate();
+    });
+  }
+}
+

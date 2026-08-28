@@ -82,7 +82,9 @@ src/rtc-stream-monitor.js      THE SOURCE OF TRUTH. Readable, commented.
 
 extension/                     Unpacked Chrome extension (MV3). Load this directly via
                                chrome://extensions → Developer mode → Load unpacked.
-  manifest.json                v1.7.0, permissions: scripting + activeTab + debugger
+  manifest.json                v1.7.0, permissions: scripting + activeTab +
+                               debugger + alarms + storage (the last two drive
+                               the auto-update check; see section 5b)
   background.js                Normal MAIN-world injection plus the persistent Meet
                                debugger/preload/queryObjects lifecycle
   rtc-early-capture.js         Zoom-only document-start constructor capture shim
@@ -95,6 +97,12 @@ dist/
   stream-monitor-launcher.html Standalone launcher page for compatible sites such as
                                Airion (not Meet): copy button + bookmarklet.
   make-launcher.js             Regenerates the launcher from src + min
+
+scripts/
+  release.mjs                  Cut a release: bump every version marker, rebuild,
+                               run the suites, tag, publish the zip to GitHub
+  install-agent.sh             Install (or --uninstall) the launchd agent that
+                               keeps an unpacked checkout auto-updating
 
 NEW-SESSION-PROMPT.md          Paste-in opener for a fresh session: current state,
                                what is deliberate, and what to pick up next
@@ -128,6 +136,9 @@ test/
   zoom-media-unit.js           Zoom route, label, activity, reset, grouping and UI
                                wording guards
   launcher-unit.js             Guards the Meet extension-only support boundary
+  update-unit.js               6 auto-update scenarios: numeric version compare,
+                               badge only on a real update, private/offline/garbage
+                               feeds claiming nothing, once-per-start reload
   cdp.js                       Zero-dependency CDP driver for a THROWAWAY Chrome
                                (own --user-data-dir, fake capture devices). Used
                                to put a real second participant into a call
@@ -507,6 +518,7 @@ node test/stats-unit.js          # 12 stats scenarios: loss/ICE/quality, ended v
 node test/zoom-media-unit.js     # Zoom route/label/activity/grouping guards
 node test/manifest-unit.js       # release/dev manifest contracts
 node test/launcher-unit.js       # launcher support-boundary copy
+node test/update-unit.js         # 6 auto-update scenarios
 ```
 
 `build.sh` minifies, syncs `extension/monitor.js` **and** `extension-dev/monitor.js`
@@ -537,6 +549,63 @@ checks. These suites pass against the final 1.7.0 source.
 `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` elsewhere. Install Playwright
 without a browser download (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i playwright`)
 and point `NODE_PATH` at it.
+
+---
+
+## 5b. Releasing, distributing and auto-updating
+
+The source lives at **github.com/mahmudcoding/rtc-stream-monitor** (private).
+
+### Cutting a release
+
+```bash
+node scripts/release.mjs 1.7.1          # add --dry-run to rehearse
+```
+
+It bumps all three version markers together (`src` `VERSION` plus both
+manifests — `build.sh` fails if they ever disagree), rebuilds, runs every
+dependency-free suite and refuses to continue if one fails, commits, tags
+`v1.7.1`, pushes, and publishes `stream-monitor-extension.zip` to GitHub
+Releases. The real-Chrome suite is deliberately NOT run there; run
+`test/run.js` yourself for anything beyond a docs-only release.
+
+### How updates actually reach people
+
+Chrome only auto-updates extensions **it installed from the Web Store**. An
+unpacked install is never updated by Chrome, and — before 1.7.0 — reloading the
+extension did not even replace a monitor already injected into an open call
+tab. Three distribution paths, in increasing order of effort for the recipient:
+
+| Path | Recipient effort | Updates |
+|---|---|---|
+| `dist/stream-monitor-launcher.html` (bookmarklet) | open a file, drag a bookmark | re-copy the file; no Meet support |
+| Unpacked zip from GitHub Releases | extract + Load unpacked | manual, but the toolbar badges `↑` when a newer release exists |
+| Unpacked clone + `scripts/install-agent.sh` | one command, then Load unpacked | **automatic**, applied at next Chrome start |
+| Chrome Web Store, unlisted | one click | **automatic**, silent, no agent — needs the one-time $5 registration |
+
+`scripts/install-agent.sh` installs a launchd agent that fast-forwards the
+checkout twice a day and at login (`--uninstall` removes it). Chrome keeps
+serving the files it loaded, so the extension restarts itself **once per browser
+start** to pick them up — `chrome.runtime.reload()` re-reads an unpacked folder
+exactly as the chrome://extensions reload button does. A stored flag makes that
+once per start rather than a restart loop, and doing it at browser start means
+no call is ever interrupted.
+
+Independently, a twice-daily check against the GitHub Releases API badges the
+toolbar `↑` with the available version. It never installs anything, and it fails
+closed in every direction: a private repository answers 404, an offline browser
+throws, an unparseable tag claims nothing — none of them badge. **The repository
+is currently private, so this check is silent by design; making it public (or
+pointing `UPDATE_FEED_URL` at any static `{"version":"x.y.z"}`) switches it on.**
+Note that publishing the zip publicly publishes the source too, since the zip
+ships `monitor.js` unminified.
+
+Deliberately NOT done: fetching `monitor.js` from a URL at runtime. It would
+give true payload auto-update with no reinstall, and it is remotely hosted code
+— permanently disqualifying for a Web Store listing under MV3, and it would let
+anyone who can write to that URL run code on every user's call pages with
+`debugger` permission in scope. A tool whose value is that its numbers are true
+does not get to take that trade.
 
 ---
 

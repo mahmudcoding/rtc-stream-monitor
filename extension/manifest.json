@@ -6,7 +6,9 @@
   "permissions": [
     "scripting",
     "activeTab",
-    "debugger"
+    "debugger",
+    "alarms",
+    "storage"
   ],
   "action": {
     "default_title": "Toggle RTC Stream Monitor",
@@ -53,6 +55,7 @@
     }
   ],
   "host_permissions": [
+    "https://api.github.com/*",
     "https://zoom.us/wc",
     "https://zoom.us/wc/*",
     "https://zoom.us/*/start*",

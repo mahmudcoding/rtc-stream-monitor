@@ -11,3 +11,4 @@ test/shot-*.png
 node_modules/
 .DS_Store
 **/.DS_Store
+store/assets/
