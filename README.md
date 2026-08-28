@@ -17,7 +17,7 @@ It was built for Mahmud, who asked: *"I want to know full details about all audi
 video streams I am receiving and sending."* It started as a one-off injection into a
 live call and grew into a packaged Chrome extension.
 
-Current version: **1.7.0**. The default view shows **only active streams**: a card
+Current version: **1.7.1**. The default view shows **only active streams**: a card
 whose stream is provably carrying no media right now — three consecutive proven-zero
 samples, or a sender the app itself switched off — leaves the default view, and the
 section header counts it (`+2 quiet`) with a one-click toggle that reveals the quiet
@@ -82,7 +82,7 @@ src/rtc-stream-monitor.js      THE SOURCE OF TRUTH. Readable, commented.
 
 extension/                     Unpacked Chrome extension (MV3). Load this directly via
                                chrome://extensions → Developer mode → Load unpacked.
-  manifest.json                v1.7.0, permissions: scripting + activeTab +
+  manifest.json                v1.7.1, permissions: scripting + activeTab +
                                debugger + alarms + storage (the last two drive
                                the auto-update check; see section 5b)
   background.js                Normal MAIN-world injection plus the persistent Meet
@@ -542,7 +542,7 @@ rebuild, minimised name-proving, and shadow-DOM media discovery. The dependency-
 suites also
 pass: names **81/81**, background **18/18 scenarios**, stats **12/12 scenarios**, plus the
 `zoom-media-unit.js` media-channel guards, manifest contracts and launcher boundary
-checks. These suites pass against the final 1.7.0 source.
+checks. These suites pass against the final 1.7.1 source.
 
 `run.js` and `names.js` pick the browser from `$CHROMIUM`, defaulting to
 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` on macOS and
@@ -659,7 +659,7 @@ ownership of its debugger session. Batch fixes to avoid unnecessary reload cycle
 
 ## 7. Open items
 
-**Current 1.7.0 status:** all automated suites pass, including the 132/132-check
+**Current 1.7.1 status:** all automated suites pass, including the 132/132-check
 real-Chrome harness across 27 isolated browser runs and 21 reported groups.
 **Live-validated on staging Aloqa (2026-08-28)** via a callrig call with two
 call-bots guests: muted self audio named from the self tile, bot camera off →
@@ -819,3 +819,4 @@ paths.
 | 1.6.6 | Defines Zoom's exact media-channel presentation as one meeting-wide Audio and one meeting-wide Video DataChannel row, both `(estimated)` with receive and send rates. Null first-sample rates remain `—`, proven zero rates read `idle`, reset/inactive evidence stays hidden, and quality stays neutral `Connected`; raw DataChannel cards remain hidden and no participant/RTP/codec/loss/jitter/resolution/fps claim is made. Aloqa/Airion and Meet are unchanged; regression status is 85/85 checks across 19 isolated runs and 14 groups, plus `zoom-media-unit.js` guards |
 | 1.6.7 | Removes stream cards whose transceiver proves the media ended, so a participant who left the call stops showing as a frozen 0 kb/s stream. Removal requires positive evidence (`stopped`, `currentDirection` `stopped`/`inactive`, no negotiated direction for that stream, or an ended receive track); a muted mic, a camera off via `replaceTrack(null)`, a paused SFU tile, an idle simulcast layer, an unsignalled stall, an unnegotiated or unmatchable stat, and any stream still moving bytes all keep their cards. Transport fallback now counts the stats the report carried rather than the survivors, so keepalive bytes on an emptied call are never reported as tunnelled media, and element cards stay confined to the pre-join case; the copied JSON reports `streams_ended`. Zoom, Aloqa/Airion and Meet paths are unchanged; regressions are 95/95 checks across 20 isolated runs and 16 groups, plus new `stats-unit.js` guards. Validated on a live Aloqa call. Also keeps the participant name a card has proved when the tile it was read from is unmounted, and gives detached audio the name proved for its own video via the session description's msid grouping, so cards stop falling back to `Video · 6273` mid-call. An outgoing card with no local media element — what a camera switched off leaves behind — takes the name from the page's own self tile. Media attached to no element at all stays SSRC-labelled. Also names participants the tile grid is not showing, from the people panel's rows. Validated end to end on live Aloqa calls, including a 40-participant one |
 | 1.7.0 | **Active-only default view.** Streams provably carrying no media — three consecutive proven-zero samples, or a sender the app switched off — leave the default view behind a `+N quiet` header toggle that reveals them with their markers; unknown never hides, bytes return a card instantly, and the model/dump/history keep every quiet stream (`streams_quiet` in the JSON). Fixes five audited 1.6.7 bugs, each with a new regression test: chart death after a mid-hover rebuild, minimise silently stopping name-proving (names now proven in the model phase), pre-media msid-group wipe sticking via the SDP cache, per-stream counter resets rendering as proven `0 kbps` and polluting totals/sparklines, and the missing `run()` re-entry guard. Also: proven 0 ms jitter renders as `0.0 ms`, hover tooltips read the frozen curve's own samples, rates use a monotonic clock, null history samples draw as gaps, Zoom channel rows use neutral icon colour, drag/resize use pointer events (touch works), panel position/size persist per origin, open-shadow-root media is discovered and named, and a newer injection replaces a stale running instance instead of toggling it (same version still toggles; build.sh enforces src/manifest version agreement). Meet/Aloqa/Zoom capture paths unchanged; live-validated on staging Aloqa via callrig |
+| 1.7.1 | Distribution and updates. `scripts/release.mjs` cuts a release (bumps `src` VERSION and both manifests together, rebuilds, gates on every dependency-free suite, tags, publishes the zip to GitHub Releases); `scripts/install-agent.sh` installs a launchd agent that fast-forwards an unpacked checkout twice daily, and the extension restarts itself once per browser start to pick it up, so an unpacked install auto-updates at the next Chrome start. A twice-daily version check badges the toolbar `↑`, failing closed on private/offline/garbage feeds. `store/` holds the complete Chrome Web Store submission kit — listing copy, per-permission justifications and generated 1280×800 / 440×280 assets — which is the only path to silent auto-update for arbitrary users. Adds `alarms` + `storage` permissions and the `api.github.com` host permission; new `test/update-unit.js` covers 6 scenarios |

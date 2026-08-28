@@ -13,7 +13,7 @@ architecture, the fixed-regression history, the live-test history, and a section
 Short version: it's a zero-dependency overlay showing live stats for every audio and
 video stream a browser sends and receives on compatible WebRTC pages.
 `src/rtc-stream-monitor.js` is the source of truth; `./build.sh` regenerates everything
-else. Version 1.7.0. Google Meet is extension-only because its connections require the
+else. Version 1.7.1. Google Meet is extension-only because its connections require the
 persistent debugger/queryObjects path; use the launcher or bookmarklet on compatible
 pages such as Airion, not Meet.
 
@@ -78,6 +78,18 @@ brought them back, and Spotlight view named the 1920px high-res subscription
 correctly. 1.6.x history: live-validated on Airion (two-party and 40-participant
 calls), Meet (debugger capture, Leave → Return recovery, OPUS/AV1 telemetry) and
 Zoom Web App (estimated channel rows, no banner).
+
+**Distribution (new in 1.7.1):** the project is now a private git repo at
+`github.com/mahmudcoding/rtc-stream-monitor`. `node scripts/release.mjs <semver>`
+cuts a release; `scripts/install-agent.sh` gives an unpacked checkout real
+auto-update (launchd pulls twice daily, the extension restarts itself once per
+browser start to pick it up). A twice-daily check badges the toolbar when a newer
+release exists — currently silent because the repo is private and the API answers
+404, which is the intended fail-closed behaviour; making the repo public or
+pointing `UPDATE_FEED_URL` at any static `{"version":"x.y.z"}` switches it on.
+`store/SUBMISSION.md` plus `node scripts/store-assets.mjs` hold the complete
+Chrome Web Store kit — the only route to silent auto-update for arbitrary users,
+blocked solely on the one-time $5 registration.
 
 **Not tested yet, in priority order:**
 
