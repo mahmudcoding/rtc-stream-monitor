@@ -66,7 +66,7 @@ console.log(run('bash', ['build.sh']).trim())
 console.log('\nrunning suites…')
 for (const suite of ['names-unit', 'background-unit', 'stats-unit', 'zoom-media-unit',
                      'zoom-background-unit', 'zoom-capture-unit', 'manifest-unit',
-                     'launcher-unit', 'update-unit']) {
+                     'launcher-unit']) {
   try {
     run('node', [`test/${suite}.js`])
     console.log('  PASS ' + suite)

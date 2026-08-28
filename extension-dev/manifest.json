@@ -6,9 +6,7 @@
   "permissions": [
     "scripting",
     "activeTab",
-    "debugger",
-    "alarms",
-    "storage"
+    "debugger"
   ],
   "action": {
     "default_title": "Toggle RTC Stream Monitor (dev)",
@@ -116,7 +114,6 @@
     }
   ],
   "host_permissions": [
-    "https://api.github.com/*",
     "https://airion-cargo.store/*",
     "https://*.airion-cargo.store/*",
     "https://airion-cargo.online/*",

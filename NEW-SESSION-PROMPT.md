@@ -79,17 +79,17 @@ correctly. 1.6.x history: live-validated on Airion (two-party and 40-participant
 calls), Meet (debugger capture, Leave → Return recovery, OPUS/AV1 telemetry) and
 Zoom Web App (estimated channel rows, no banner).
 
-**Distribution (new in 1.7.1):** the project is a public git repo at
+**Distribution (1.7.1):** public git repo at
 `github.com/mahmudcoding/rtc-stream-monitor`. `node scripts/release.mjs <semver>`
-cuts a release; `scripts/install-agent.sh` gives an unpacked checkout real
-auto-update (launchd pulls twice daily, the extension restarts itself once per
-browser start to pick it up). The twice-daily version check is live now that the
-repo is public — it badges the toolbar `↑` and never installs anything — and
-`releases/latest/download/stream-monitor-extension.zip` is a no-auth install
-link that can be sent to anyone.
-`store/SUBMISSION.md` plus `node scripts/store-assets.mjs` hold the complete
-Chrome Web Store kit — the only route to silent auto-update for arbitrary users,
-blocked solely on the one-time $5 registration.
+cuts a release (bumps all three version markers, rebuilds, gates on every
+dependency-free suite, tags, publishes the zip);
+`releases/latest/download/stream-monitor-extension.zip` is a no-auth install link.
+**The extension ships no update machinery and makes no network requests of its
+own** — a version check and a launchd self-update agent were built and then
+removed on request; permissions are `scripting` + `activeTab` + `debugger` only.
+`store/SUBMISSION.md` plus `node scripts/store-assets.mjs` hold the Chrome Web
+Store kit, which is the only supported route to silent updates if that is ever
+wanted.
 
 **Not tested yet, in priority order:**
 

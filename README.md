@@ -82,9 +82,7 @@ src/rtc-stream-monitor.js      THE SOURCE OF TRUTH. Readable, commented.
 
 extension/                     Unpacked Chrome extension (MV3). Load this directly via
                                chrome://extensions → Developer mode → Load unpacked.
-  manifest.json                v1.7.1, permissions: scripting + activeTab +
-                               debugger + alarms + storage (the last two drive
-                               the auto-update check; see section 5b)
+  manifest.json                v1.7.1, permissions: scripting + activeTab + debugger
   background.js                Normal MAIN-world injection plus the persistent Meet
                                debugger/preload/queryObjects lifecycle
   rtc-early-capture.js         Zoom-only document-start constructor capture shim
@@ -101,8 +99,7 @@ dist/
 scripts/
   release.mjs                  Cut a release: bump every version marker, rebuild,
                                run the suites, tag, publish the zip to GitHub
-  install-agent.sh             Install (or --uninstall) the launchd agent that
-                               keeps an unpacked checkout auto-updating
+  store-assets.mjs             Generate the Web Store 1280x800 / 440x280 images
 
 NEW-SESSION-PROMPT.md          Paste-in opener for a fresh session: current state,
                                what is deliberate, and what to pick up next
@@ -136,9 +133,6 @@ test/
   zoom-media-unit.js           Zoom route, label, activity, reset, grouping and UI
                                wording guards
   launcher-unit.js             Guards the Meet extension-only support boundary
-  update-unit.js               6 auto-update scenarios: numeric version compare,
-                               badge only on a real update, private/offline/garbage
-                               feeds claiming nothing, once-per-start reload
   cdp.js                       Zero-dependency CDP driver for a THROWAWAY Chrome
                                (own --user-data-dir, fake capture devices). Used
                                to put a real second participant into a call
@@ -518,7 +512,6 @@ node test/stats-unit.js          # 12 stats scenarios: loss/ICE/quality, ended v
 node test/zoom-media-unit.js     # Zoom route/label/activity/grouping guards
 node test/manifest-unit.js       # release/dev manifest contracts
 node test/launcher-unit.js       # launcher support-boundary copy
-node test/update-unit.js         # 6 auto-update scenarios
 ```
 
 `build.sh` minifies, syncs `extension/monitor.js` **and** `extension-dev/monitor.js`
@@ -569,43 +562,36 @@ dependency-free suite and refuses to continue if one fails, commits, tags
 Releases. The real-Chrome suite is deliberately NOT run there; run
 `test/run.js` yourself for anything beyond a docs-only release.
 
-### How updates actually reach people
+### How updates reach people
 
 Chrome only auto-updates extensions **it installed from the Web Store**. An
-unpacked install is never updated by Chrome, and — before 1.7.0 — reloading the
-extension did not even replace a monitor already injected into an open call
-tab. Three distribution paths, in increasing order of effort for the recipient:
+unpacked install is never updated by Chrome, so an update means telling people
+and having them re-install. Distribution paths, in increasing order of effort
+for the recipient:
 
 | Path | Recipient effort | Updates |
 |---|---|---|
 | `dist/stream-monitor-launcher.html` (bookmarklet) | open a file, drag a bookmark | re-copy the file; no Meet support |
-| [Unpacked zip](https://github.com/mahmudcoding/rtc-stream-monitor/releases/latest/download/stream-monitor-extension.zip) from GitHub Releases | extract + Load unpacked | manual, but the toolbar badges `↑` when a newer release exists |
-| Unpacked clone + `scripts/install-agent.sh` | one command, then Load unpacked | **automatic**, applied at next Chrome start |
-| Chrome Web Store, unlisted | one click | **automatic**, silent, no agent — needs the one-time $5 registration |
+| [Unpacked zip](https://github.com/mahmudcoding/rtc-stream-monitor/releases/latest/download/stream-monitor-extension.zip) from GitHub Releases | extract + Load unpacked | re-download and re-load |
+| Chrome Web Store, unlisted | one click | automatic and silent — needs the one-time $5 registration |
 
-`scripts/install-agent.sh` installs a launchd agent that fast-forwards the
-checkout twice a day and at login (`--uninstall` removes it). Chrome keeps
-serving the files it loaded, so the extension restarts itself **once per browser
-start** to pick them up — `chrome.runtime.reload()` re-reads an unpacked folder
-exactly as the chrome://extensions reload button does. A stored flag makes that
-once per start rather than a restart loop, and doing it at browser start means
-no call is ever interrupted.
+`releases/latest/download/stream-monitor-extension.zip` is a working no-auth
+link that can be sent to anyone.
 
-Independently, a twice-daily check against the GitHub Releases API badges the
-toolbar `↑` with the available version. It never installs anything, and it fails
-closed in every direction: a 404, an offline browser, an unparseable tag — none
-of them badge. The repository is public, so this check is **live**: an
-unauthenticated `GET /releases/latest` returns the current tag, and
-`releases/latest/download/stream-monitor-extension.zip` is a working
-no-auth install link anyone can be sent. Point `UPDATE_FEED_URL` at any static
-`{"version":"x.y.z"}` if the feed ever needs to move.
+**No update machinery ships in the extension.** A version check and a
+self-restarting launchd agent were built and then deliberately removed: the
+extension makes no network requests of its own, and its permissions are back to
+`scripting` + `activeTab` + `debugger`. A tool whose value is that its numbers
+are true is worth keeping free of background behaviour nobody asked for. If
+silent updates are ever wanted, the Web Store listing in `store/` is the
+supported route rather than anything self-hosted — Chrome refuses off-store
+installs on Mac and Windows, so a self-hosted feed cannot work regardless.
 
 Deliberately NOT done: fetching `monitor.js` from a URL at runtime. It would
-give true payload auto-update with no reinstall, and it is remotely hosted code
-— permanently disqualifying for a Web Store listing under MV3, and it would let
+give payload updates with no reinstall, and it is remotely hosted code —
+permanently disqualifying for a Web Store listing under MV3, and it would let
 anyone who can write to that URL run code on every user's call pages with
-`debugger` permission in scope. A tool whose value is that its numbers are true
-does not get to take that trade.
+`debugger` permission in scope.
 
 ---
 

@@ -4,10 +4,11 @@ Everything here is ready to paste. What only you can do: register as a Chrome
 Web Store developer (one-time **$5 USD**, your Google account, accept the
 developer agreement) at https://chrome.google.com/webstore/devconsole
 
-**Why bother:** a Web Store listing is the only way other people get *silent
-automatic updates*. Chrome refuses to install extensions from anywhere else on
-Mac and Windows, and never auto-updates an unpacked one. Publish once, and every
-`node scripts/release.mjs` afterwards reaches everyone within hours.
+**Why bother:** a Web Store listing is the only way other people get a one-click
+install and *silent automatic updates*. Chrome refuses to install extensions
+from anywhere else on Mac and Windows, and never auto-updates an unpacked one —
+and the extension itself deliberately ships no update machinery. Publish once,
+and every `node scripts/release.mjs` afterwards reaches everyone within hours.
 
 Choose **Unlisted** visibility unless you want it in public search: unlisted
 installs normally for anyone with the link, but does not appear in the store.
@@ -68,9 +69,9 @@ toolbar button on a call to show or hide the panel.
 
 PRIVACY
 Everything runs locally in your browser. The extension reads WebRTC statistics
-and the page's own participant labels to name streams. It sends no call data
-anywhere, has no analytics, and no account. Its only network request is a
-twice-daily version check against GitHub to tell you when an update exists.
+and the page's own participant labels to name streams. It makes no network
+requests of its own at all: no call data leaves your machine, there is no
+analytics, no account, and no telemetry.
 ```
 
 **Category:** Developer Tools
@@ -106,24 +107,6 @@ objects from the heap, which is the only way to report Meet call statistics.
 The attachment is made only after the user clicks the toolbar button on a Meet
 tab, and is released when the tab closes or navigates away. It is not used on
 any other site.
-```
-
-**`alarms`**
-```
-Schedules a twice-daily check for a newer published version so the user is told
-when their copy is out of date.
-```
-
-**`storage`**
-```
-Stores a single flag that prevents the update restart from repeating, plus the
-user's panel position. No call data or personal data is stored.
-```
-
-**`host_permissions` — api.github.com**
-```
-Reads the latest published version number to tell the user an update exists.
-No other request is made and nothing is downloaded or executed from it.
 ```
 
 **`host_permissions` — zoom.us / zoom.com meeting routes**
