@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RTC Stream Monitor (dev auto-inject)",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Dev build: auto-injects the monitor on the live-test targets so no toolbar click is needed. Not for release.",
   "permissions": [
     "scripting",

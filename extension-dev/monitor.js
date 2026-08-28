@@ -8,7 +8,7 @@
   'use strict';
 
   var NS = '__rtcStreamMonitor__';
-  var VERSION = '1.7.0';
+  var VERSION = '1.7.1';
   /* Same version already running: this run is the toggle gesture. An OLDER
      instance, though, must not swallow the click — reloading the extension
      does not replace a script already injected into the page, so the toolbar
