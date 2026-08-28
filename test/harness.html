@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>WebRTC harness</title>
+<style>
+  body{margin:0;background:#111;color:#eee;font:14px system-ui;padding:16px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:900px}
+  .tile{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9}
+  .tile video{width:100%;height:100%;object-fit:cover}
+  .nm{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.6);
+      padding:2px 8px;border-radius:6px;font-size:12px}
+  .badge{font-size:9px;background:#2563eb;border-radius:4px;padding:0 4px;margin-left:4px}
+  #log{margin-top:14px;font:12px ui-monospace;color:#8f8}
+</style></head>
+<body>
+<h3 id="mode"></h3>
+<div class="grid" id="grid"></div>
+<div id="log">booting…</div>
+
+<script>
+const MODE = new URLSearchParams(location.search).get('mode') || 'rtp';
+document.getElementById('mode').textContent = 'mode: ' + MODE;
+const log = (m) => { document.getElementById('log').textContent = m; console.log('[harness]', m); };
+window.__harnessReady = false;
+
+// ---- Scenario A: real RTP media, loopback pc1 -> pc2, several "participants"
+// DOM deliberately mimics Google Meet: the name lives in aria-label, NOT in text.
+async function rtpScenario(n, opts) {
+  opts = opts || {};
+  const names = opts.names || ['Ada Lovelace', 'Grace Hopper', 'Alan Turing', 'Katherine Johnson',
+                               'Linus Pauling', 'Rosalind Franklin', 'Barbara Liskov'];
+  const selfName = opts.selfName || 'Mahmud (you)';
+  const src = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: true });
+  // self-tile, as every real call app renders — this is what outbound cards read
+  const selfTile = document.createElement('div');
+  selfTile.className = 'tile';
+  selfTile.setAttribute('aria-label', selfName);
+  if (opts.airion) {
+    selfTile.setAttribute('data-testid', 'participant-tile');
+    selfTile.setAttribute('data-local', 'true');
+  }
+  const sv = document.createElement('video');
+  sv.autoplay = true; sv.muted = true; sv.playsInline = true; sv.srcObject = src;
+  const scap = document.createElement('div'); scap.className = 'nm'; scap.textContent = selfName;
+  if (opts.airion) scap.setAttribute('data-testid', 'participant-name');
+  selfTile.appendChild(sv); selfTile.appendChild(scap);
+  document.getElementById('grid').appendChild(selfTile);
+  const pcs = [];
+  for (let i = 0; i < n; i++) {
+    const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+    pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+    pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    if (opts.airion) {
+      tile.setAttribute('data-testid', 'participant-tile');
+      tile.setAttribute('data-local', 'false');
+      const participantId = opts.participantIds && opts.participantIds[i] || ('U_AIRION_' + i);
+      const isGuest = !!(opts.guestFlags && opts.guestFlags[i]);
+      // Exact observable Airion/React shape: the host DOM node owns an
+      // enumerable fiber key; identity fields can live at different ancestors
+      // of that fiber chain.
+      tile['__reactFiber$test'] = {
+        memoizedProps: {},
+        return: {
+          memoizedProps: { remoteParticipantId: (isGuest ? 'guest:' : '') + participantId },
+          return: {
+            memoizedProps: { participant: { user_id: participantId, is_guest: isGuest } },
+            return: null
+          }
+        }
+      };
+    }
+    // Meet-style: accessible label on the tile carries the name; the visible
+    // caption is a separate node that also includes a role badge.
+    tile.setAttribute('aria-label', names[i] + (i % 3 === 0 ? ', muted' : ''));
+    const v = document.createElement('video');
+    v.autoplay = true; v.muted = true; v.playsInline = true;
+    const cap = document.createElement('div');
+    cap.className = 'nm';
+    cap.innerHTML = names[i] + (opts.guestBadge && i === 1 ? '<span class="badge">Guest</span>' : '');
+    if (opts.airion) cap.setAttribute('data-testid', 'participant-name');
+    tile.appendChild(v); tile.appendChild(cap);
+    document.getElementById('grid').appendChild(tile);
+
+    let audioSink = null;
+    if (opts.airion) {
+      // Live Airion puts remote microphone media in a hidden sink outside the
+      // named participant tile. Its video is a separate stream inside the tile.
+      audioSink = document.createElement('audio');
+      audioSink.autoplay = true;
+      audioSink.setAttribute('data-testid', 'remote-audio-sink');
+      audioSink.setAttribute('aria-hidden', 'true');
+      const participantId = opts.participantIds && opts.participantIds[i] || ('U_AIRION_' + i);
+      const isGuest = !!(opts.guestFlags && opts.guestFlags[i]);
+      const trackSid = 'TR_' + (isGuest ? 'guest_' : 'user_') + i;
+      // Live Airion carries detached-audio ownership in a parent fiber's
+      // streamKey, not in MediaStream.id or an ordinary DOM attribute.
+      audioSink['__reactFiber$test'] = {
+        memoizedProps: {},
+        return: {
+          memoizedProps: {
+            streamKey: 'primary:' + (isGuest ? 'guest:' : '') + participantId +
+              ':microphone:' + trackSid
+          },
+          return: null
+        }
+      };
+      document.body.appendChild(audioSink);
+    }
+    pc2.ontrack = e => {
+      if (!opts.airion) {
+        if (!v.srcObject) v.srcObject = e.streams[0];
+        return;
+      }
+      const target = e.track.kind === 'audio' ? audioSink : v;
+      const stream = new MediaStream([e.track]);
+      // Keep the browser-generated UUID. Live evidence disproved an earlier
+      // assumption that this ID carried LiveKit's participant owner token.
+      if (e.track.kind === 'audio') {
+        // RemoteMediaSink's component props bind the streamKey to this exact
+        // MediaStream object; equality is what prevents a stale Fiber render
+        // from attributing a replacement sink to the previous participant.
+        audioSink['__reactFiber$test'].return.memoizedProps.stream = stream;
+      }
+      target.srcObject = stream;
+    };
+    // Clone per participant: WebRTC carries the sender's track id across the wire
+    // (msid), so sharing one source would give every remote track the SAME id and
+    // make name-matching look correct when it is really just picking the first tile.
+    // The loopback harness sees sender and receiver track IDs in one document.
+    // Clone even the first Airion participant so an inbound track cannot
+    // accidentally direct-link to the local self-preview before its real tile.
+    const mine = (i === 0 && !opts.airion)
+      ? src
+      : new MediaStream(src.getTracks().map(t => t.clone()));
+    mine.getTracks().forEach(t => pc1.addTrack(t, mine));
+
+    const offer = await pc1.createOffer();
+    await pc1.setLocalDescription(offer);
+    await pc2.setRemoteDescription(offer);
+    const answer = await pc2.createAnswer();
+    await pc2.setLocalDescription(answer);
+    await pc1.setRemoteDescription(answer);
+
+    // LiveKit/Airion can expose inbound-rtp SSRCs without trackIdentifier.  The
+    // receiver and DOM MediaStreamTrack still exist, so a monitor can bridge
+    // stats SSRC -> RTCRtpReceiver synchronization source -> receiver track ->
+    // media element.  Strip only the stats field to reproduce that live shape.
+    if (opts.stripInboundTrackIdentifiers) {
+      const nativeGetStats = pc2.getStats.bind(pc2);
+      Object.defineProperty(pc2, 'getStats', { configurable: true, value: async () => {
+        const report = await nativeGetStats();
+        const stripped = new Map();
+        report.forEach((stat, id) => {
+          if (stat.type !== 'inbound-rtp') { stripped.set(id, stat); return; }
+          const copy = Object.assign({}, stat);
+          delete copy.trackIdentifier;
+          delete copy.trackId;
+          stripped.set(id, copy);
+        });
+        return stripped;
+      }});
+    }
+    pcs.push(pc1, pc2);
+  }
+  if (opts.airion) {
+    // Airion also repeats participant identities in its side panel.  This is
+    // observable corroboration, but not a license to guess when multiple
+    // remote names remain ambiguous.
+    const panel = document.createElement('aside');
+    panel.setAttribute('data-testid', 'participants-panel');
+    [selfName].concat(names.slice(0, n)).forEach(name => {
+      const row = document.createElement('div');
+      row.setAttribute('data-testid', 'participant-name');
+      row.textContent = name;
+      panel.appendChild(row);
+    });
+    document.body.appendChild(panel);
+  }
+  window.__pcs = pcs;
+  return pcs;
+}
+
+// ---- Scenario: Aloqa caps its tile grid and paginates it, so in a large call
+// most participants have no tile at all — only a row in the people panel. Their
+// microphone still arrives, through a detached sink with no participant DOM of
+// its own, and a tile-only name map left those cards reading "Audio · 3308".
+// Two remote participants, one rendered as a tile, one listed only.
+async function airionOffGridScenario() {
+  const PEOPLE = [
+    { name: 'On Grid',  id: 'U_AIRION_ONGRID',  guest: false, tile: true  },
+    { name: 'Off Grid', id: 'G_AIRION_OFFGRID', guest: true,  tile: false }
+  ];
+  const src = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 180 }, audio: true });
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+
+  const selfTile = document.createElement('div');
+  selfTile.className = 'tile';
+  selfTile.setAttribute('data-testid', 'participant-tile');
+  selfTile.setAttribute('data-local', 'true');
+  const sv = document.createElement('video');
+  sv.autoplay = true; sv.muted = true; sv.playsInline = true; sv.srcObject = src;
+  const sn = document.createElement('span');
+  sn.setAttribute('data-testid', 'participant-name');
+  sn.textContent = 'Mahmud (you)';
+  selfTile.appendChild(sv); selfTile.appendChild(sn);
+  document.getElementById('grid').appendChild(selfTile);
+
+  // The people panel: one row per participant, whichever are on the grid. The
+  // owner id lives in React props and the name in the avatar's aria-label,
+  // while the avatar's TEXT is only the initials — the shape measured live.
+  const list = document.createElement('aside');
+  list.setAttribute('data-testid', 'participants-list');
+  PEOPLE.forEach(p => {
+    const row = document.createElement('div');
+    row.setAttribute('data-testid', 'participant-row');
+    row['__reactFiber$test'] = {
+      memoizedProps: {},
+      return: { memoizedProps: { row: { userId: p.id } }, return: null }
+    };
+    const avatar = document.createElement('div');
+    avatar.setAttribute('aria-label', p.name);
+    const initials = document.createElement('span');
+    initials.textContent = p.name.split(' ').map(w => w[0]).join('');
+    avatar.appendChild(initials);
+    row.appendChild(avatar);
+    if (p.guest) {
+      const badge = document.createElement('span');
+      badge.setAttribute('data-testid', 'participant-row-guest-badge');
+      badge.textContent = 'GUEST';
+      row.appendChild(badge);
+    }
+    list.appendChild(row);
+  });
+  document.body.appendChild(list);
+
+  const sinks = {};
+  PEOPLE.forEach(p => {
+    if (p.tile) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.setAttribute('data-testid', 'participant-tile');
+      tile.setAttribute('data-local', 'false');
+      tile['__reactFiber$test'] = {
+        memoizedProps: {},
+        return: {
+          memoizedProps: { remoteParticipantId: (p.guest ? 'guest:' : '') + p.id },
+          return: { memoizedProps: { participant: { user_id: p.id, is_guest: p.guest } }, return: null }
+        }
+      };
+      const v = document.createElement('video');
+      v.autoplay = true; v.muted = true; v.playsInline = true;
+      const n = document.createElement('span');
+      n.setAttribute('data-testid', 'participant-name');
+      n.textContent = p.name;
+      tile.appendChild(v); tile.appendChild(n);
+      document.getElementById('grid').appendChild(tile);
+      p.video = v;
+    }
+    // Everyone's microphone arrives, tile or not, through a detached sink.
+    const sink = document.createElement('audio');
+    sink.autoplay = true;
+    sink.setAttribute('data-testid', 'remote-audio-sink');
+    sink.setAttribute('aria-hidden', 'true');
+    sink['__reactFiber$test'] = {
+      memoizedProps: {},
+      return: {
+        memoizedProps: {
+          streamKey: 'primary:' + (p.guest ? 'guest:' : '') + p.id + ':microphone:TR_' + p.id
+        },
+        return: null
+      }
+    };
+    document.body.appendChild(sink);
+    sinks[p.id] = { el: sink, person: p };
+  });
+
+  const streamOwner = {};
+  PEOPLE.forEach(p => {
+    const stream = new MediaStream(src.getTracks().map(t => t.clone()));
+    stream.getTracks().forEach(t => pc1.addTrack(t, stream));
+    streamOwner[stream.id] = p;
+  });
+  pc2.ontrack = e => {
+    const p = streamOwner[e.streams[0] && e.streams[0].id];
+    if (!p) return;
+    const one = new MediaStream([e.track]);
+    if (e.track.kind === 'audio') {
+      const s = sinks[p.id];
+      s.el['__reactFiber$test'].return.memoizedProps.stream = one;
+      s.el.srcObject = one;
+    } else if (p.video && !p.video.srcObject) {
+      p.video.srcObject = one;
+    }
+  };
+
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+  window.__pcs = [pc1, pc2];
+  return [pc1, pc2];
+}
+
+// ---- Scenario: the DOM a name is read from comes and goes while the stream
+// does not.  Grid virtualisation, pagination and ordinary re-renders unmount
+// participant tiles mid-call, and remote audio is routinely played through a
+// hidden sink outside any tile.  Cards must keep the identity they proved, and
+// must still invent nothing for media attached to no element at all.
+async function tileChurnScenario() {
+  const PEOPLE = [
+    { key: 'plain',    name: 'Ada Plain'      },  // tile stays put — control
+    { key: 'virtual',  name: 'Vanishing Vera' },  // tile unmounted mid-call
+    { key: 'detached', name: 'Detached Dana'  },  // audio in an unnamed body-level sink
+    { key: 'orphan',   name: 'Never Nina'     }   // never attached to any element
+  ];
+  const src = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 180 }, audio: true });
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+
+  // Measured on a live Aloqa call: the self tile is marked local and carries a
+  // named span. With the camera off it holds no media element at all, because
+  // nobody plays their own microphone back.
+  const selfTile = document.createElement('div');
+  selfTile.className = 'tile';
+  selfTile.setAttribute('data-testid', 'participant-tile');
+  selfTile.setAttribute('data-local', 'true');
+  const sv = document.createElement('video');
+  sv.autoplay = true; sv.muted = true; sv.playsInline = true; sv.srcObject = src;
+  const sc = document.createElement('span');
+  sc.className = 'nm';
+  sc.setAttribute('data-testid', 'participant-name');
+  sc.textContent = 'Mahmud (you)';
+  selfTile.appendChild(sv); selfTile.appendChild(sc);
+  document.getElementById('grid').appendChild(selfTile);
+
+  const byStreamId = {};
+  PEOPLE.forEach(p => {
+    const stream = new MediaStream(src.getTracks().map(t => t.clone()));
+    stream.getTracks().forEach(t => pc1.addTrack(t, stream));
+    byStreamId[stream.id] = p;
+    p.localStream = stream;   // kept so cameraOff() can find this person's sender
+  });
+
+  function makeTile(p, stream) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.setAttribute('aria-label', p.name);
+    const v = document.createElement('video');
+    v.autoplay = true; v.muted = true; v.playsInline = true;
+    v.srcObject = stream;
+    const c = document.createElement('div'); c.className = 'nm'; c.textContent = p.name;
+    tile.appendChild(v); tile.appendChild(c);
+    document.getElementById('grid').appendChild(tile);
+    p.tile = tile;
+  }
+
+  pc2.ontrack = e => {
+    const p = byStreamId[e.streams[0] && e.streams[0].id];
+    if (!p || p.tile || p.key === 'orphan') return;
+    p.remote = e.streams[0];
+    if (p.key === 'detached') {
+      // Only the video reaches the named tile; the audio is re-wrapped into its
+      // own MediaStream in a hidden sink, so the DOM no longer shows they are
+      // the same person. Only the sender's msid grouping still says so.
+      makeTile(p, new MediaStream(p.remote.getVideoTracks()));
+      const a = document.createElement('audio');
+      a.autoplay = true;
+      a.srcObject = new MediaStream(p.remote.getAudioTracks());
+      document.body.appendChild(a);
+    } else {
+      makeTile(p, p.remote);
+    }
+  };
+
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+
+  window.__pcs = [pc1, pc2];
+  window.__tiles = {
+    // What a virtualised grid does when a participant scrolls out of view.
+    unmount: (key) => {
+      const p = PEOPLE.find(x => x.key === key);
+      if (p && p.tile) { p.tile.remove(); p.tile = null; }
+    },
+    // Turning the camera off: the self-preview element goes, the named self
+    // tile stays. Outgoing cards then have no local element to read a name from.
+    dropSelfMedia: () => { sv.srcObject = null; sv.remove(); },
+    // How an app actually switches a camera off — measured on a live Aloqa
+    // call: it deactivates the encoding and disables the track, and never
+    // renegotiates. The transceiver stays sendonly, so the stream is paused,
+    // not gone, and Chrome reports outbound-rtp.active === false.
+    cameraOff: async (key) => {
+      const p = PEOPLE.find(x => x.key === key);
+      const sender = pc1.getSenders().find(s => s.track && s.track.kind === 'video' &&
+        p.localStream.getVideoTracks().some(t => t.id === s.track.id));
+      if (!sender) return 'no sender for ' + key;
+      const params = sender.getParameters();
+      params.encodings = (params.encodings || [{}]).map(e => Object.assign({}, e, { active: false }));
+      await sender.setParameters(params);
+      sender.track.enabled = false;
+      return 'deactivated ' + key;
+    },
+    // Switching it back on: same button, reverse direction — no renegotiation,
+    // the paused stream simply carries media again.
+    cameraOn: async (key) => {
+      const p = PEOPLE.find(x => x.key === key);
+      const sender = pc1.getSenders().find(s => s.track && s.track.kind === 'video' &&
+        p.localStream.getVideoTracks().some(t => t.id === s.track.id));
+      if (!sender) return 'no sender for ' + key;
+      sender.track.enabled = true;
+      const params = sender.getParameters();
+      params.encodings = (params.encodings || [{}]).map(e => Object.assign({}, e, { active: true }));
+      await sender.setParameters(params);
+      return 'reactivated ' + key;
+    }
+  };
+  return [pc1, pc2];
+}
+
+// ---- Scenario: participants leaving an SFU-shaped call.  One PeerConnection
+// carries every participant, so dropping one leaves the others' transceivers
+// untouched — the shape in which Chrome keeps a departed participant's frozen
+// inbound-rtp stat in the report and the panel used to show it at 0 kb/s
+// forever.  Also exposes the two ways a stream can go quiet WITHOUT leaving,
+// which must keep their cards.
+async function departureScenario() {
+  const names = ['Ada Lovelace', 'Grace Hopper', 'Alan Turing'];
+  const src = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 180 }, audio: true });
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+
+  const selfTile = document.createElement('div');
+  selfTile.className = 'tile';
+  selfTile.setAttribute('aria-label', 'Mahmud (you)');
+  const sv = document.createElement('video');
+  sv.autoplay = true; sv.muted = true; sv.playsInline = true; sv.srcObject = src;
+  const scap = document.createElement('div'); scap.className = 'nm'; scap.textContent = 'Mahmud (you)';
+  selfTile.appendChild(sv); selfTile.appendChild(scap);
+  document.getElementById('grid').appendChild(selfTile);
+
+  const people = [], videoByStreamId = {};
+  names.forEach(name => {
+    // Clone per participant: sharing one source would give every remote track
+    // the same id and make name matching look right by accident.
+    const stream = new MediaStream(src.getTracks().map(t => t.clone()));
+    const senders = stream.getTracks().map(t => pc1.addTrack(t, stream));
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.setAttribute('aria-label', name);
+    const v = document.createElement('video');
+    v.autoplay = true; v.muted = true; v.playsInline = true;
+    const cap = document.createElement('div'); cap.className = 'nm'; cap.textContent = name;
+    tile.appendChild(v); tile.appendChild(cap);
+    document.getElementById('grid').appendChild(tile);
+    videoByStreamId[stream.id] = v;
+    people.push({ name, stream, senders, tile, video: v });
+  });
+  // msid carries the sender's stream id across the wire, so each participant's
+  // audio and video arrive together on one remote stream and share one tile.
+  pc2.ontrack = e => {
+    const v = videoByStreamId[e.streams[0] && e.streams[0].id];
+    if (v && !v.srcObject) v.srcObject = e.streams[0];
+  };
+
+  async function negotiate() {
+    const offer = await pc1.createOffer();
+    await pc1.setLocalDescription(offer);
+    await pc2.setRemoteDescription(offer);
+    const answer = await pc2.createAnswer();
+    await pc2.setLocalDescription(answer);
+    await pc1.setRemoteDescription(answer);
+  }
+  async function drop(person) {
+    person.senders.forEach(s => pc1.removeTrack(s));
+    person.tile.remove();
+  }
+  await negotiate();
+
+  window.__pcs = [pc1, pc2];
+  window.__departure = {
+    names,
+    // Left the call: the m-line renegotiates to `inactive` and the transceiver
+    // stays behind. Chrome keeps reporting the frozen stat.
+    leave: async (i) => { await drop(people[i]); await negotiate(); },
+    leaveAll: async () => { for (const p of people) await drop(p); await negotiate(); },
+    // Still in the call, microphone and camera off. Sends silence/black.
+    mute: (i) => { people[i].senders.forEach(s => s.track && (s.track.enabled = false)); },
+    // Sender stopped with no signalling at all: a genuine 0 kb/s card that
+    // nothing has proved is gone, and so must survive.
+    stall: (i) => { people[i].senders.forEach(s => s.track && s.track.stop()); }
+  };
+  return [pc1, pc2];
+}
+
+// ---- Google Meet fallback contract: virtual audio/video slots have no exact
+// participant identity. The explicitly approximate UI fallback is allowed only
+// for complete same-PC sets with equal counts, unique tracks and numeric mids;
+// each sorted audio slot takes the same-rank named video and adds "(likely)".
+function meetTile(name, local, stream) {
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.setAttribute('aria-label', name + (local ? ' (you)' : ''));
+  const video = document.createElement('video');
+  video.autoplay = true; video.muted = true; video.playsInline = true;
+  if (stream) video.srcObject = stream;
+  const cap = document.createElement('div'); cap.className = 'nm'; cap.textContent = name;
+  tile.appendChild(video); tile.appendChild(cap);
+  document.getElementById('grid').appendChild(tile);
+  return video;
+}
+
+async function meetPair(trackGroups, videoByTrackId) {
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+  pc2.ontrack = e => {
+    // Meet's remote audio is not represented by a named <audio srcObject>.
+    // Attach only video. The monitor must correlate audio via the exact PC,
+    // never by a document-wide unique-looking name.
+    if (e.track.kind !== 'video') return;
+    const target = videoByTrackId[e.track.id];
+    if (target) target.srcObject = new MediaStream([e.track]);
+  };
+  const senders = [];
+  const mediaGroups = [];
+  trackGroups.forEach(group => {
+    const stream = new MediaStream(group);
+    mediaGroups.push({ streamId: stream.id, trackIds: group.map(track => track.id) });
+    group.forEach(track => senders.push(pc1.addTrack(track, stream)));
+  });
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+  return { pcs: [pc1, pc2], senders, mediaGroups };
+}
+
+function shapeMeetInboundStats(pc, mode) {
+  const nativeGetStats = pc.getStats.bind(pc);
+  Object.defineProperty(pc, 'getStats', { configurable: true, value: async () => {
+    const report = await nativeGetStats();
+    const shaped = new Map();
+    let audioIndex = 0, videoIndex = 0, firstAudioTrack = null;
+    report.forEach((stat, id) => {
+      if (stat.type !== 'inbound-rtp') { shaped.set(id, stat); return; }
+      const copy = Object.assign({}, stat);
+      const kind = copy.kind || copy.mediaType;
+      if (kind === 'audio') {
+        copy.mid = String(3 + audioIndex);
+        if (audioIndex === 0) firstAudioTrack = copy.trackIdentifier;
+        if (mode === 'missing-mid' && audioIndex === 0) delete copy.mid;
+        if (mode === 'duplicate-mid' && audioIndex > 0) copy.mid = '3';
+        if (mode === 'duplicate-track' && audioIndex > 0) copy.trackIdentifier = firstAudioTrack;
+        if (mode === 'missing-track' && audioIndex === 0) {
+          delete copy.trackIdentifier; delete copy.trackId;
+        }
+        audioIndex++;
+      } else if (kind === 'video') {
+        copy.mid = String(10 + videoIndex++);
+      }
+      shaped.set(id, copy);
+    });
+    return shaped;
+  }});
+}
+
+async function meetDetachedAudioScenario(mode) {
+  const name = 'Mahmud Nosirov';
+  const src = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 360 }, audio: true
+  });
+  meetTile(name, true, src);
+
+  const videoByTrackId = {};
+  const tracks = [];
+  const ranked = mode === 'rank' || mode === 'duplicate-mid' ||
+    mode === 'duplicate-track' || mode === 'duplicate-name' ||
+    mode === 'conflicting-exact' || mode === 'missing-mid' || mode === 'missing-track';
+  const videoOwners = (ranked || mode === 'multi-video') ? 2 : 1;
+  const audioOwners = mode === 'cross-pc' ? 0 : ((ranked || mode === 'multi-audio') ? 2 : 1);
+  // Audio virtual slots deliberately receive the lower mids (3/4), while the
+  // independently rendered video slots receive 10/11, matching the live Meet
+  // shape. The approved approximation pairs the two sorted sets by rank.
+  for (let i = 0; i < audioOwners; i++) tracks.push(src.getAudioTracks()[0].clone());
+  for (let i = 0; i < videoOwners; i++) {
+    const video = src.getVideoTracks()[0].clone();
+    const remoteName = mode === 'duplicate-name'
+      ? name : (videoOwners === 2 ? ['Ada Lovelace', 'Grace Hopper'][i] : name);
+    videoByTrackId[video.id] = meetTile(remoteName, false, null);
+    tracks.push(video);
+  }
+  // Meet exposes independent virtual media slots rather than a shared A/V
+  // MediaStream identity. Give every sender its own stream so a shared-msid
+  // implementation cannot accidentally satisfy this fixture.
+  const main = await meetPair(tracks.map(track => [track]), videoByTrackId);
+  if (mode === 'conflicting-exact') {
+    const receiver = main.pcs[1].getReceivers()
+      .filter(row => row.track && row.track.kind === 'audio')[0];
+    const exactAudio = document.createElement('audio');
+    exactAudio.autoplay = true;
+    exactAudio.setAttribute('aria-label', 'Conflicting Owner');
+    exactAudio.srcObject = new MediaStream([receiver.track]);
+    document.body.appendChild(exactAudio);
+  }
+  if (mode === 'missing-track') {
+    // Prevent the normal receiver SSRC bridge from reconstructing the deleted
+    // stats track. This leaves a genuinely missing track contract for pairing.
+    Object.defineProperty(main.pcs[1], 'getTransceivers', {
+      configurable: true, value: () => []
+    });
+    main.pcs[1].getReceivers().filter(receiver => receiver.track && receiver.track.kind === 'audio')
+      .forEach(receiver => Object.defineProperty(receiver, 'getSynchronizationSources', {
+        configurable: true, value: () => []
+      }));
+  }
+  shapeMeetInboundStats(main.pcs[1], mode);
+  const pcs = main.pcs.slice();
+  window.__meetFixture = {
+    mode,
+    mediaGroups: main.mediaGroups
+  };
+
+  if (mode === 'cross-pc') {
+    // One active audio and one named video is still insufficient if they come
+    // from different PeerConnections. A document-wide name guess would attach
+    // this audio to the wrong owner in split/SFU transport topologies.
+    const audio = src.getAudioTracks()[0].clone();
+    const other = await meetPair([[audio]], {});
+    shapeMeetInboundStats(other.pcs[1], 'rank');
+    pcs.push.apply(pcs, other.pcs);
+  }
+
+  window.__pcs = pcs;
+  return pcs;
+}
+
+// ---- Zoom Web Client contract: the /wc shell creates a same-origin media
+// iframe whose path is /<numeric meeting id>/(start|join)?from=pwa (the PWA
+// deliberately strips /wc). It can construct its PeerConnections before document_end. The
+// document_start shim is installed by the browser test as an init script.  Do
+// not expose the connections on window: the later monitor must get them from
+// the early stash, not from its generic enumerable-object scan.
+async function zoomEarlyChildScenario() {
+  const NS = '__rtcStreamMonitorEarlyCapture__';
+  const capture = window[NS];
+  if (!capture || capture.version !== 1) throw new Error('Zoom early-capture shim is missing');
+
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+  pc1.createDataChannel('zoom-media', { ordered: false, maxRetransmits: 0 });
+  pc2.ondatachannel = () => {};
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+
+  window.__zoomEarlyFixture = {
+    createdBeforeMonitor: typeof window.__rtcStreamMonitor__ !== 'object',
+    stashedBeforeMonitor: capture.connections.length,
+    childPath: location.pathname
+  };
+  // Keep the production handoff reachable by its explicit name while hiding it
+  // from Object.keys(window), which is what the monitor's generic scan uses.
+  try {
+    Object.defineProperty(window, NS, {
+      configurable: true, enumerable: false, writable: false, value: capture
+    });
+  } catch (e) {}
+  // The browser's timer registry keeps this closure (and therefore both PCs)
+  // alive without adding another enumerable object-graph route to them.
+  setInterval(() => {
+    if (pc1.connectionState === '__never__' || pc2.connectionState === '__never__') log('impossible');
+  }, 30000);
+}
+
+async function zoomEarlyNestedScenario() {
+  const iframe = document.createElement('iframe');
+  iframe.id = 'webclient';
+  iframe.className = 'pwa-webclient__iframe';
+  iframe.title = 'Zoom Web Client media frame';
+  iframe.style.cssText = 'width:920px;height:620px;border:1px solid #333;border-radius:10px';
+  iframe.src = '/5467856297/start?from=pwa&mode=zoom-early-child';
+  document.getElementById('grid').replaceWith(iframe);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Zoom child frame timeout')), 15000);
+    iframe.addEventListener('load', () => {
+      const poll = setInterval(() => {
+        try {
+          if (!iframe.contentWindow.__harnessReady) return;
+          clearInterval(poll); clearTimeout(timeout); resolve();
+        } catch (e) {}
+      }, 100);
+    }, { once: true });
+  });
+  window.__zoomNestedFixture = { childReadyBeforeMonitor: true };
+}
+
+// ---- Scenario: a call app built from web components — every tile, including
+// the self tile, lives inside an open shadow root. A plain document query sees
+// no media at all here, and the name climb has to cross the shadow boundary to
+// reach the labelled host ancestry.
+async function shadowDomScenario() {
+  const names = ['Shadow Sam', 'Shadow Sue'];
+  const src = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 180 }, audio: true });
+  const shell = document.createElement('div');
+  document.getElementById('grid').appendChild(shell);
+  const root = shell.attachShadow({ mode: 'open' });
+
+  function shadowTile(name, stream) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.setAttribute('aria-label', name);
+    const v = document.createElement('video');
+    v.autoplay = true; v.muted = true; v.playsInline = true;
+    if (stream) v.srcObject = stream;
+    const cap = document.createElement('div'); cap.className = 'nm'; cap.textContent = name;
+    tile.appendChild(v); tile.appendChild(cap);
+    root.appendChild(tile);
+    return v;
+  }
+  shadowTile('Mahmud (you)', src);
+
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+  const videoByStreamId = {};
+  names.forEach(name => {
+    const stream = new MediaStream(src.getTracks().map(t => t.clone()));
+    stream.getTracks().forEach(t => pc1.addTrack(t, stream));
+    videoByStreamId[stream.id] = shadowTile(name, null);
+  });
+  pc2.ontrack = e => {
+    const v = videoByStreamId[e.streams[0] && e.streams[0].id];
+    if (v && !v.srcObject) v.srcObject = e.streams[0];
+  };
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+  window.__pcs = [pc1, pc2];
+  return [pc1, pc2];
+}
+
+// ---- Scenario B: transport-only peer connections. The generic fixture keeps
+// arbitrary labels so it can prove the Zoom interpretation never leaks to
+// other DataChannel apps. The exact Zoom fixture uses the two labels observed
+// in the live Web Client and moves bytes in both directions on each channel.
+async function dcScenario(opts) {
+  opts = opts || {};
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+  const videoLabel = opts.zoom
+    ? 'ZoomWebclientVideoDataChannel'
+    : 'video';
+  const audioLabel = opts.zoom
+    ? 'ZoomWebclientAudioDataChannel'
+    : 'audio';
+  const videoChannels = [
+    pc1.createDataChannel(videoLabel, { ordered: false, maxRetransmits: 0 })
+  ];
+  const audioChannels = [
+    pc1.createDataChannel(audioLabel, { ordered: false, maxRetransmits: 0 })
+  ];
+  if (opts.duplicates) {
+    videoChannels.push(pc1.createDataChannel(videoLabel, { ordered: false, maxRetransmits: 0 }));
+    audioChannels.push(pc1.createDataChannel(audioLabel, { ordered: false, maxRetransmits: 0 }));
+  }
+  const remote = {};
+  pc2.ondatachannel = event => {
+    (remote[event.channel.label] || (remote[event.channel.label] = [])).push(event.channel);
+  };
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+
+  await new Promise(r => { videoChannels[0].onopen = r; setTimeout(r, 4000); });
+  // push a steady ~600 kbps of "encoded frames" so the transport counters move
+  const frame = new Uint8Array(2500);
+  setInterval(() => {
+    videoChannels.forEach(channel => {
+      try { if (channel.readyState === 'open') {
+        for (let i = 0; i < 30; i++) channel.send(frame);
+      } } catch (e) {}
+    });
+    audioChannels.forEach(channel => {
+      try { if (channel.readyState === 'open') channel.send(frame.subarray(0, 160)); } catch (e) {}
+    });
+    if (opts.zoom) {
+      // The real labels identify a media channel, not a direction. Exercise
+      // both counters so each estimated row must keep ↓ and ↑ distinct.
+      (remote[videoLabel] || []).forEach(channel => {
+        try { if (channel.readyState === 'open') {
+          for (let i = 0; i < 15; i++) channel.send(frame);
+        } } catch (e) {}
+      });
+      (remote[audioLabel] || []).forEach(channel => {
+        try { if (channel.readyState === 'open') channel.send(frame.subarray(0, 120)); } catch (e) {}
+      });
+    }
+  }, 1000);
+  // Keep the remote endpoint alive in the timer closure, but expose only the
+  // Web Client side. This matches a real page: its stats contain one source per
+  // label rather than also counting the remote server endpoint.
+  window.__pcs = opts.zoom ? [pc1] : [pc1, pc2];
+  return window.__pcs;
+}
+
+(async () => {
+  try {
+    if (MODE === 'departure') { await departureScenario(); }
+    else if (MODE === 'airion-offgrid') { await airionOffGridScenario(); }
+    else if (MODE === 'tile-churn') { await tileChurnScenario(); }
+    else if (MODE === 'dc') { await dcScenario(); }
+    else if (MODE === 'zoom-dc') { await dcScenario({ zoom: true, duplicates: true }); }
+    else if (MODE === 'guest') { await rtpScenario(3, { guestBadge: true }); }
+    else if (MODE === 'airion-ssrc') {
+      await rtpScenario(1, {
+        airion: true, names: ['Guest'], selfName: 'Test2 (you)',
+        participantIds: ['G_AIRION_GUEST'], guestFlags: [true],
+        stripInboundTrackIdentifiers: true
+      });
+    }
+    else if (MODE === 'airion-multiparty') {
+      await rtpScenario(2, {
+        airion: true, names: ['Test5', 'Guest'], selfName: 'Test2 (you)',
+        participantIds: ['U_AIRION_TEST5', 'G_AIRION_GUEST'], guestFlags: [false, true],
+        stripInboundTrackIdentifiers: true
+      });
+    }
+    else if (MODE === 'meet-audio-rank') { await meetDetachedAudioScenario('rank'); }
+    else if (MODE === 'meet-audio-cross-pc') { await meetDetachedAudioScenario('cross-pc'); }
+    else if (MODE === 'meet-audio-multi-audio') { await meetDetachedAudioScenario('multi-audio'); }
+    else if (MODE === 'meet-audio-multi-video') { await meetDetachedAudioScenario('multi-video'); }
+    else if (MODE === 'meet-audio-missing-mid') { await meetDetachedAudioScenario('missing-mid'); }
+    else if (MODE === 'meet-audio-duplicate-mid') { await meetDetachedAudioScenario('duplicate-mid'); }
+    else if (MODE === 'meet-audio-duplicate-track') { await meetDetachedAudioScenario('duplicate-track'); }
+    else if (MODE === 'meet-audio-duplicate-name') { await meetDetachedAudioScenario('duplicate-name'); }
+    else if (MODE === 'meet-audio-conflicting-exact') { await meetDetachedAudioScenario('conflicting-exact'); }
+    else if (MODE === 'meet-audio-missing-track') { await meetDetachedAudioScenario('missing-track'); }
+    else if (MODE === 'shadow-dom') { await shadowDomScenario(); }
+    else if (MODE === 'zoom-early-child') { await zoomEarlyChildScenario(); }
+    else if (MODE === 'zoom-early-nested') { await zoomEarlyNestedScenario(); }
+    else { await rtpScenario(5); }
+    log('scenario up: ' + MODE);
+    setTimeout(() => { window.__harnessReady = true; log('ready'); }, 2500);
+  } catch (e) {
+    log('ERROR ' + e.message);
+    window.__harnessError = String(e && e.stack || e);
+  }
+})();
+</script>
+</body></html>

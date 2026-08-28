@@ -1,0 +1,139 @@
+{
+  "manifest_version": 3,
+  "name": "RTC Stream Monitor (dev auto-inject)",
+  "version": "1.7.0",
+  "description": "Dev build: auto-injects the monitor on the live-test targets so no toolbar click is needed. Not for release.",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "debugger"
+  ],
+  "action": {
+    "default_title": "Toggle RTC Stream Monitor (dev)",
+    "default_icon": {
+      "16": "icons/icon128.png",
+      "48": "icons/icon128.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon128.png",
+    "48": "icons/icon128.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://zoom.us/wc",
+        "https://zoom.us/wc/*",
+        "https://zoom.us/*/start*",
+        "https://zoom.us/*/join*",
+        "https://*.zoom.us/wc",
+        "https://*.zoom.us/wc/*",
+        "https://*.zoom.us/*/start*",
+        "https://*.zoom.us/*/join*",
+        "https://zoom.com/wc",
+        "https://zoom.com/wc/*",
+        "https://zoom.com/*/start*",
+        "https://zoom.com/*/join*",
+        "https://*.zoom.com/wc",
+        "https://*.zoom.com/wc/*",
+        "https://*.zoom.com/*/start*",
+        "https://*.zoom.com/*/join*"
+      ],
+      "js": [
+        "rtc-early-capture.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://airion-cargo.store/*",
+        "https://*.airion-cargo.store/*",
+        "https://airion-cargo.online/*",
+        "https://*.airion-cargo.online/*",
+        "https://meet.google.com/*",
+        "https://zoom.us/wc",
+        "https://zoom.us/wc/*",
+        "https://zoom.us/*/start*",
+        "https://zoom.us/*/join*",
+        "https://*.zoom.us/wc",
+        "https://*.zoom.us/wc/*",
+        "https://*.zoom.us/*/start*",
+        "https://*.zoom.us/*/join*",
+        "https://zoom.com/wc",
+        "https://zoom.com/wc/*",
+        "https://zoom.com/*/start*",
+        "https://zoom.com/*/join*",
+        "https://*.zoom.com/wc",
+        "https://*.zoom.com/wc/*",
+        "https://*.zoom.com/*/start*",
+        "https://*.zoom.com/*/join*"
+      ],
+      "js": [
+        "probe-isolated.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://airion-cargo.store/*",
+        "https://*.airion-cargo.store/*",
+        "https://airion-cargo.online/*",
+        "https://*.airion-cargo.online/*",
+        "https://meet.google.com/*",
+        "https://zoom.us/wc",
+        "https://zoom.us/wc/*",
+        "https://zoom.us/*/start*",
+        "https://zoom.us/*/join*",
+        "https://*.zoom.us/wc",
+        "https://*.zoom.us/wc/*",
+        "https://*.zoom.us/*/start*",
+        "https://*.zoom.us/*/join*",
+        "https://zoom.com/wc",
+        "https://zoom.com/wc/*",
+        "https://zoom.com/*/start*",
+        "https://zoom.com/*/join*",
+        "https://*.zoom.com/wc",
+        "https://*.zoom.com/wc/*",
+        "https://*.zoom.com/*/start*",
+        "https://*.zoom.com/*/join*"
+      ],
+      "js": [
+        "monitor.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ],
+  "host_permissions": [
+    "https://airion-cargo.store/*",
+    "https://*.airion-cargo.store/*",
+    "https://airion-cargo.online/*",
+    "https://*.airion-cargo.online/*",
+    "https://meet.google.com/*",
+    "https://zoom.us/wc",
+    "https://zoom.us/wc/*",
+    "https://zoom.us/*/start*",
+    "https://zoom.us/*/join*",
+    "https://*.zoom.us/wc",
+    "https://*.zoom.us/wc/*",
+    "https://*.zoom.us/*/start*",
+    "https://*.zoom.us/*/join*",
+    "https://zoom.com/wc",
+    "https://zoom.com/wc/*",
+    "https://zoom.com/*/start*",
+    "https://zoom.com/*/join*",
+    "https://*.zoom.com/wc",
+    "https://*.zoom.com/wc/*",
+    "https://*.zoom.com/*/start*",
+    "https://*.zoom.com/*/join*"
+  ]
+}
