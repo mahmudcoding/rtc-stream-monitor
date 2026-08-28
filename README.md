@@ -554,7 +554,7 @@ and point `NODE_PATH` at it.
 
 ## 5b. Releasing, distributing and auto-updating
 
-The source lives at **github.com/mahmudcoding/rtc-stream-monitor** (private).
+The source lives at **github.com/mahmudcoding/rtc-stream-monitor** (public).
 
 ### Cutting a release
 
@@ -579,7 +579,7 @@ tab. Three distribution paths, in increasing order of effort for the recipient:
 | Path | Recipient effort | Updates |
 |---|---|---|
 | `dist/stream-monitor-launcher.html` (bookmarklet) | open a file, drag a bookmark | re-copy the file; no Meet support |
-| Unpacked zip from GitHub Releases | extract + Load unpacked | manual, but the toolbar badges `↑` when a newer release exists |
+| [Unpacked zip](https://github.com/mahmudcoding/rtc-stream-monitor/releases/latest/download/stream-monitor-extension.zip) from GitHub Releases | extract + Load unpacked | manual, but the toolbar badges `↑` when a newer release exists |
 | Unpacked clone + `scripts/install-agent.sh` | one command, then Load unpacked | **automatic**, applied at next Chrome start |
 | Chrome Web Store, unlisted | one click | **automatic**, silent, no agent — needs the one-time $5 registration |
 
@@ -593,12 +593,12 @@ no call is ever interrupted.
 
 Independently, a twice-daily check against the GitHub Releases API badges the
 toolbar `↑` with the available version. It never installs anything, and it fails
-closed in every direction: a private repository answers 404, an offline browser
-throws, an unparseable tag claims nothing — none of them badge. **The repository
-is currently private, so this check is silent by design; making it public (or
-pointing `UPDATE_FEED_URL` at any static `{"version":"x.y.z"}`) switches it on.**
-Note that publishing the zip publicly publishes the source too, since the zip
-ships `monitor.js` unminified.
+closed in every direction: a 404, an offline browser, an unparseable tag — none
+of them badge. The repository is public, so this check is **live**: an
+unauthenticated `GET /releases/latest` returns the current tag, and
+`releases/latest/download/stream-monitor-extension.zip` is a working
+no-auth install link anyone can be sent. Point `UPDATE_FEED_URL` at any static
+`{"version":"x.y.z"}` if the feed ever needs to move.
 
 Deliberately NOT done: fetching `monitor.js` from a URL at runtime. It would
 give true payload auto-update with no reinstall, and it is remotely hosted code
