@@ -35,6 +35,19 @@ const probe = async (skipDump) => {
     bps: c.querySelector('[data-u=bps]') ? c.querySelector('[data-u=bps]').textContent.trim() : null,
     meta: c.querySelector('[data-u=meta]') ? c.querySelector('[data-u=meta]').textContent.trim() : null
   }));
+  // Expand one sending and one receiving card and read what the dump renders,
+  // so the linked-stat groups are covered rather than assumed.
+  const expandedDump = (() => {
+    const seen = {};
+    for (const c of r.querySelectorAll('.card[data-sid]')) {
+      const s = streamById[c.getAttribute('data-sid')];
+      if (!s || seen[s.dir]) continue;
+      const chev = c.querySelector('.chev');
+      if (chev) chev.click();
+      seen[s.dir] = { dir: s.dir, kind: s.kind };
+    }
+    return seen;
+  })();
   const dcs = [...r.querySelectorAll('.card[data-dc]')].map(c => ({
     title: c.querySelector('[data-u=dcttl]').textContent.trim(),
     bps: c.querySelector('[data-u=dcbps]').textContent.trim(),
@@ -76,6 +89,18 @@ const probe = async (skipDump) => {
     meetTileCount: document.querySelectorAll('.tile').length,
     scroll: { clientH: body.clientHeight, scrollH: body.scrollHeight },
     quietPills: [...r.querySelectorAll('.qtog')].map(b => b.textContent.trim()),
+    expandedDump,
+    dumps: [...r.querySelectorAll('.card[data-sid]')].map(c => {
+      const s = streamById[c.getAttribute('data-sid')];
+      const dl = c.querySelector('[data-u=exp]');
+      if (!s || !dl || !dl.classList.contains('on')) return null;
+      return {
+        dir: s.dir, kind: s.kind,
+        keys: [...dl.querySelectorAll('dt')].map(d => d.textContent.trim()),
+        headings: [...dl.querySelectorAll('dt')].filter(d => d.nextElementSibling &&
+          !d.nextElementSibling.textContent.trim()).map(d => d.textContent.trim())
+      };
+    }).filter(Boolean),
     model: m ? { pcs: m.pcs, nIn: m.inbound.length, nOut: m.outbound.length,
                  quiet: m.quietStreams || 0,
                  down: m.down === null ? null : Math.round(m.down),
@@ -1030,7 +1055,33 @@ async function zoomEarlyNestedScenario(browser) {
   check('a participant seen only while minimised is still remembered',
         minNames.minimised === 'Late Larry', minNames.minimised);
 
-  console.log('\n\x1b[1m20. Version upgrade — a newer injection replaces a stale instance\x1b[0m');
+  console.log('\n\x1b[1m20. Expanded stats — every linked stat is surfaced\x1b[0m');
+  const dumpRun = await scenario(browser, 'rtp', 7000);
+  const outDump = dumpRun.dumps.filter(d => d.dir === 'out')[0];
+  const inDump = dumpRun.dumps.filter(d => d.dir === 'in')[0];
+  check('a sending and a receiving card were expanded',
+        !!outDump && !!inDump, JSON.stringify(dumpRun.expandedDump));
+  // packetsLost does not exist on outbound-rtp; it lives in the far end's
+  // remote-inbound-rtp report, which the dump used to discard entirely.
+  check('sending dump carries the far end\'s cumulative packetsLost',
+        outDump && outDump.keys.includes('packetsLost'),
+        outDump && outDump.keys.filter(k => /packets|jitter|roundTrip/i.test(k)).join(', '));
+  check('sending dump names whose measurement that is',
+        outDump && outDump.headings.some(h => /far end/i.test(h)),
+        outDump && outDump.headings.join(' | '));
+  check('sending dump carries the media source behind the encoder',
+        outDump && outDump.headings.some(h => /media source/i.test(h)) &&
+          outDump.keys.includes('trackIdentifier'),
+        outDump && outDump.headings.join(' | '));
+  check('receiving dump carries the sender\'s own RTCP report',
+        inDump && inDump.headings.some(h => /sender/i.test(h)),
+        inDump && inDump.headings.join(' | '));
+  check('both dumps resolve the codec rather than only its id',
+        outDump && inDump && outDump.headings.some(h => /codec/i.test(h)) &&
+          inDump.keys.includes('mimeType'),
+        inDump && inDump.keys.filter(k => /mime|clockRate|payloadType/.test(k)).join(', '));
+
+  console.log('\n\x1b[1m21. Version upgrade — a newer injection replaces a stale instance\x1b[0m');
   const up = await versionUpgradeScenario(browser);
   check('no page errors', up.errors.length === 0, up.errors.slice(0, 2).join(' | ') || 'none');
   check('the stale instance ran and captured the call',
@@ -1044,7 +1095,7 @@ async function zoomEarlyNestedScenario(browser) {
         up.toggledOff === true && up.toggledBack === true,
         'off=' + up.toggledOff + ' back=' + up.toggledBack);
 
-  console.log('\n\x1b[1m21. Shadow DOM — media and names inside open shadow roots\x1b[0m');
+  console.log('\n\x1b[1m22. Shadow DOM — media and names inside open shadow roots\x1b[0m');
   const sh = await scenario(browser, 'shadow-dom');
   const shIn = sh.cards.filter(c => c.dir === 'in');
   const shTitles = name => shIn.filter(c => c.title === name).map(c => c.kind).sort().join(',');

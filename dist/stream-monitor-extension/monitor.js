@@ -414,15 +414,7 @@
               ? (s.jitterBufferDelay / Math.max(1, s.jitterBufferEmittedCount)) * 1000 : null,
             framesDropped: num(s.framesDropped), freezeCount: num(s.freezeCount),
             nack: num(s.nackCount), pli: num(s.pliCount),
-            decoder: s.decoderImplementation,
-            /* The dump used to render this stat alone, so everything hanging
-               off it was invisible: the sender's own RTCP report, the audio
-               playout path, and the resolved codec. They are all one id away. */
-            powerEfficient: typeof s.powerEfficientDecoder === 'boolean' ? s.powerEfficientDecoder : null,
-            raw: s,
-            rawRemote: s.remoteId ? byId.get(s.remoteId) : null,
-            rawPlayout: s.playoutId ? byId.get(s.playoutId) : null,
-            rawCodec: s.codecId ? byId.get(s.codecId) : null
+            decoder: s.decoderImplementation, raw: s
           });
         } else if (s.type === 'outbound-rtp') {
           var obps = delta(s, 'bytesSent'), ri = remoteIn[s.ssrc];
@@ -452,17 +444,7 @@
             rtt: ri && num(ri.roundTripTime) !== null ? ri.roundTripTime * 1000 : null,
             remoteJitter: ri && num(ri.jitter) !== null ? ri.jitter * 1000 : null,
             fraction: ri && num(ri.fractionLost) !== null ? ri.fractionLost * 100 : null,
-            /* `packetsLost` does not exist on outbound-rtp — loss is a receiver
-               measurement, and for our own stream it comes back in this
-               separate remote-inbound-rtp stat. Keeping only three derived
-               numbers from it meant the cumulative count, and the far end's
-               jitter, were read and then thrown away. */
-            remoteLost: ri && num(ri.packetsLost) !== null ? ri.packetsLost : null,
-            powerEfficient: typeof s.powerEfficientEncoder === 'boolean' ? s.powerEfficientEncoder : null,
-            raw: s,
-            rawRemote: ri || null,
-            rawSource: s.mediaSourceId ? byId.get(s.mediaSourceId) : null,
-            rawCodec: s.codecId ? byId.get(s.codecId) : null
+            raw: s
           });
         } else if (s.type === 'candidate-pair' &&
                    (s.id === selectedPairId || (!selectedPairId && (s.selected || s.nominated)))) {
@@ -2024,44 +2006,6 @@
     return n === 1 ? Object.keys(names)[0] : null;
   }
 
-  function groupHeading(title) {
-    return '<dt style="color:' + C.ink2 + ';padding-top:4px">' + esc(title) + '</dt><dd></dd>';
-  }
-
-  /* Render one stat object. Object-valued fields used to be skipped outright,
-     which silently dropped qualityLimitationDurations — the seconds the encoder
-     spent limited by bandwidth vs CPU, which is the evidence behind the
-     limitation warning. Flatten one level instead. */
-  function statRows(stat) {
-    if (!stat) return '';
-    var out = '';
-    function row(k, v) {
-      return '<dt>' + esc(k) + '</dt><dd>' +
-        esc(typeof v === 'number' ? Math.round(v * 1000) / 1000 : v) + '</dd>';
-    }
-    Object.keys(stat).sort().forEach(function (k) {
-      var v;
-      try { v = stat[k]; } catch (e) { return; }
-      if (v === null || v === undefined) return;
-      if (typeof v === 'function') return;
-      if (typeof v === 'object') {
-        Object.keys(v).sort().forEach(function (sub) {
-          var sv = v[sub];
-          if (sv === null || sv === undefined || typeof sv === 'object') return;
-          out += row(k + '.' + sub, sv);
-        });
-        return;
-      }
-      out += row(k, v);
-    });
-    return out;
-  }
-
-  function statGroup(title, stat) {
-    var rows = statRows(stat);
-    return rows ? groupHeading(title) + rows : '';
-  }
-
   function updateCard(el, s, m, color) {
     var kind = s.kind || 'video';
     /* An element carrying this exact track id is proof of whose stream this
@@ -2133,20 +2077,11 @@
     }
     if (s.dir === 'in') {
       if (s.lossPct !== null) meta.push('loss <b>' + fmtPct(s.lossPct) + '</b>');
-      if (s.raw && num(s.raw.packetsLost)) meta.push('lost <b>' + s.raw.packetsLost + '</b>');
       if (s.jitter !== null) meta.push('jitter <b>' + fmtMs(s.jitter, 1) + '</b>');
       if (s.framesDropped) meta.push('dropped <b>' + s.framesDropped + '</b>');
       if (s.freezeCount) meta.push('freezes <b>' + s.freezeCount + '</b>');
     } else {
       if (s.fraction !== null && s.fraction !== undefined) meta.push('loss <b>' + fmtPct(s.fraction) + '</b>');
-      /* The receiving card shows jitter and a cumulative lost count; both exist
-         for a sending stream too, in the far end's RTCP report, and were being
-         collected and then dropped. On an SFU the "far end" is the server, so
-         this is a direct read on our own upload leg. */
-      if (s.remoteJitter !== null && s.remoteJitter !== undefined) {
-        meta.push('jitter <b>' + fmtMs(s.remoteJitter, 1) + '</b>');
-      }
-      if (s.remoteLost) meta.push('lost <b>' + s.remoteLost + '</b>');
       if (s.rtt !== null && s.rtt !== undefined) meta.push('rtt <b>' + fmtMs(s.rtt) + '</b>');
       if (s.rid) meta.push('layer <b>' + esc(s.rid) + '</b>');
       /* Simulcast without rids. Meet sends three encodings of one track and sets
@@ -2177,13 +2112,6 @@
       if (s.scalability && s.scalability !== 'L1T1') meta.push('svc <b>' + esc(s.scalability) + '</b>');
       if (s.limit) meta.push('<span class="pill" style="border-color:rgba(250,178,25,.5);color:' + C.warn + '">⚠ ' + esc(s.limit) + '-limited</span>');
     }
-    /* Hardware codec unavailable. Chrome states this outright, and it explains
-       dropped frames and freezes on a stream whose loss and jitter are clean —
-       the constraint is this machine, not the network. Only ever shown on an
-       explicit `false`: absent means unknown, which claims nothing. */
-    if (s.powerEfficient === false) {
-      meta.push('<span class="pill">software ' + (s.dir === 'in' ? 'decode' : 'encode') + '</span>');
-    }
     /* A revealed quiet card whose silence no other marker explains still says
        why it was hidden from the default view. */
     if (s.quiet && !statusExplained) meta.push('<span class="pill">quiet</span>');
@@ -2204,21 +2132,14 @@
     var dl = el.querySelector('[data-u=exp]');
     dl.classList.toggle('on', !!expanded[s.id]);
     if (expanded[s.id]) {
-      var top = dl.scrollTop, out = '';
-      out += statRows(s.raw);
-      /* Everything below hangs off an id in the stat above and was previously
-         invisible. Each group says whose measurement it is: an outbound
-         stream's loss and jitter are the FAR END's report about us, not
-         something this browser measured, and that distinction matters as much
-         as the numbers. */
-      out += statGroup(s.dir === 'out'
-        ? 'reported by the far end (RTCP)'
-        : 'reported by the sender (RTCP)', s.rawRemote);
-      out += statGroup('media source (before encoding)', s.rawSource);
-      out += statGroup('playout', s.rawPlayout);
-      out += statGroup('codec', s.rawCodec);
+      var top = dl.scrollTop, raw = s.raw || {}, out = '';
+      Object.keys(raw).sort().forEach(function (k) {
+        var v = raw[k];
+        if (v === null || v === undefined || typeof v === 'object') return;
+        out += '<dt>' + esc(k) + '</dt><dd>' + esc(typeof v === 'number' ? Math.round(v * 1000) / 1000 : v) + '</dd>';
+      });
       if (linked) {
-        out += groupHeading('device');
+        out += '<dt style="color:' + C.ink2 + ';padding-top:4px">device</dt><dd></dd>';
         ['label', 'state', 'enabled', 'trackMuted', 'settingsFps', 'renderFps', 'dropped',
          'sampleRate', 'channels', 'ec', 'ns', 'agc'].forEach(function (k) {
           if (linked[k] === undefined || linked[k] === null) return;

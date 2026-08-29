@@ -51,7 +51,7 @@ debugger/queryObjects path are unchanged.
 | Hero | Round-trip time in ms, quality rating (Excellent/Good/Fair/Poor) with a 4-bar icon, ICE path (direct LAN / direct STUN / TURN relay) |
 | Stat tiles | Receiving bitrate, Sending bitrate, Packet loss, Jitter — loss and jitter carry a status word (ok / elevated / high) |
 | Chart | 90-second throughput, two series (blue = received, orange = sent), hover crosshair + tooltip, arrow-key navigation, and a `table` toggle for a text equivalent |
-| Sending / Receiving | One card per **active** RTP stream: participant name, codec, resolution, fps, bitrate + sparkline, packet loss, jitter, dropped frames, freeze count. Audio cards show a live level meter. `▾` expands to the complete raw stats dump. Streams provably carrying no media are hidden behind a `+N quiet` toggle in the section header — never silently, and never on an unknown rate |
+| Sending / Receiving | One card per **active** RTP stream: participant name, codec, resolution, fps, bitrate + sparkline, packet loss, jitter, dropped frames, freeze count. Audio cards show a live level meter. `▾` expands to the complete raw stats dump — including every stat linked from it: the far end's RTCP report, the media source behind the encoder, audio playout, and the resolved codec, each under a heading naming whose measurement it is. Streams provably carrying no media are hidden behind a `+N quiet` toggle in the section header — never silently, and never on an unknown rate |
 | Zoom media channels | On an exact Zoom web-client route with zero RTP, one meeting-wide Audio channel and one meeting-wide Video channel `(estimated)` row from the exact Web Client media DataChannel labels. Each says `all participants`; duplicate labels say `N channels combined`; ↓/↑ preserve both channel directions rather than representing participant streams. Unknown first-sample rates stay `—`, proven zero rates read `idle`, reset/inactive evidence stays hidden, and transport-only quality is neutral `Connected` |
 | Transport | Local/remote candidate types, network type, uplink bandwidth estimate, total bytes on the wire, DTLS state |
 | Warnings | Encoder quality limitation (bandwidth vs CPU), with an explanation of what to do |
@@ -120,8 +120,8 @@ test/
                                guarded Meet-slot, DataChannel, participant
                                departure, tile churn, camera off/on and
                                shadow-DOM fixture modes
-  run.js                       Playwright suite, 132 checks across 27 browser runs
-                               reported under 21 scenario groups
+  run.js                       Playwright suite, 138 checks across 28 browser runs
+                               reported under 22 scenario groups
   names.js                     Focused probe: dumps card titles per section
   net.js                       Checks sandbox egress to meeting services
   names-unit.js                81 dependency-free name-resolution assertions,
@@ -479,7 +479,7 @@ Each of these was a real defect discovered against live or simulated traffic.
   before, an older instance is stopped (panel removed, hooks restored) and the new
   one starts in its place. `build.sh` fails if the source VERSION and the manifest
   version ever diverge, and the startup console line prints the running version.
-- Browser regressions are **132/132 checks across 27 isolated browser runs** under
+- Browser regressions are **138/138 checks across 28 isolated browser runs** under
   **21 scenario groups**: `tile-churn` now walks camera off → quiet-hidden → revealed
   with its marker → camera on → back in the default view; `departure` proves a stalled
   participant is quiet-hidden but never removed and comes back at 0 kb/s when
@@ -490,6 +490,39 @@ Each of these was a real defect discovered against live or simulated traffic.
   same version still toggles. The dependency-free stats suite grew to **12
   scenarios**, adding counter-reset, jitter-zero, msid-group-healing and
   quiet-hysteresis guards.
+
+### 1.7.3 the expanded dump shows everything that is linked to a stream
+
+- An expanded card used to render exactly one stat object, so every stat hanging
+  off it by id was invisible. A sending stream has no `packetsLost` of its own —
+  loss is a receiver measurement, and for our own stream it arrives in a separate
+  `remote-inbound-rtp` object the far end sends back over RTCP. The monitor read
+  three numbers out of it and discarded the rest, which is why a receiving card
+  could show a cumulative lost count and a sending card could not.
+- Now each card also renders, under a heading that names whose measurement it is:
+  **reported by the far end / by the sender (RTCP)** (`remote-inbound-rtp` for
+  outgoing, `remote-outbound-rtp` for incoming), **media source (before
+  encoding)**, **playout**, **codec**, and the existing **device** group. On an
+  SFU the far end is the server, so an outgoing stream's loss and jitter are a
+  direct read on our own upload leg — worth saying rather than implying.
+- Object-valued fields were skipped outright, which silently dropped
+  `qualityLimitationDurations` — the seconds the encoder spent limited by
+  bandwidth versus CPU, the evidence behind the limitation warning. They are
+  flattened one level now (`qualityLimitationDurations.bandwidth`).
+- The card lines gained what was already collected and never shown: the far
+  end's `jitter` on sending cards, a cumulative `lost` count on both, and a
+  `software decode` / `software encode` marker when Chrome reports
+  `powerEfficientDecoder`/`Encoder` as false. That marker explains dropped
+  frames and freezes on a stream whose loss and jitter are clean — the
+  constraint is the machine, not the network. It is shown only on an explicit
+  `false`; absent means unknown and claims nothing.
+- Verified on a live staging Aloqa call: a receiving card read
+  `loss 0.0% · lost 3 · jitter 3.0 ms · dropped 1 · software decode` over 80
+  dump rows, and a sending card `jitter 1.4 ms · rtt 4 ms · svc L3T3_KEY ·
+  software encode` over 91 rows, carrying `packetsLost`,
+  `qualityLimitationDurations.bandwidth`, `targetBitrate` and the source
+  `trackIdentifier`. Browser regressions are **138/138 across 28 isolated runs**
+  under **22 groups**.
 
 ### A testing lesson worth keeping
 
@@ -525,7 +558,7 @@ cd test && NODE_PATH=$(npm root -g) node run.js
 
 `run.js` launches Chromium with `--use-fake-device-for-media-stream`, spins up real peer
 connections with real encoded media, and injects the monitor exactly as the extension
-does. It passes **132/132 checks across 27 isolated browser runs**, reported under 21
+does. It passes **138/138 checks across 28 isolated browser runs**, reported under 22
 groups: Meet-style RTP, guest-badge DOM, exact Airion two-person/multiparty attribution,
 Meet same-PC rank pairing plus cross-PC/count/mid/track/name/host fail-closed guards,
 Zoom inner-PWA-frame document-start capture, generic DataChannel fail-closed behavior,
@@ -645,8 +678,8 @@ ownership of its debugger session. Batch fixes to avoid unnecessary reload cycle
 
 ## 7. Open items
 
-**Current 1.7.1 status:** all automated suites pass, including the 132/132-check
-real-Chrome harness across 27 isolated browser runs and 21 reported groups.
+**Current 1.7.1 status:** all automated suites pass, including the 138/138-check
+real-Chrome harness across 28 isolated browser runs and 22 reported groups.
 **Live-validated on staging Aloqa (2026-08-28)** via a callrig call with two
 call-bots guests: muted self audio named from the self tile, bot camera off →
 inbound card quiet-hidden in ~4 s and back instantly on camera on, host camera
