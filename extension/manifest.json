@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RTC Stream Monitor",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Live inspector for every audio and video stream you send and receive on any WebRTC page.",
   "permissions": [
     "scripting",
